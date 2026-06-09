@@ -1,0 +1,18 @@
+Copy your Google Earth Engine exported files into these folders:
+
+1. GeoTIFF rasters -> data/rasters/
+2. CSV scorecard -> data/tables/
+3. GeoJSON boundary -> data/vectors/
+
+Required file names:
+
+data/rasters/Punjab_Environmental_Stress_Hotspots.tif
+data/rasters/Punjab_Drought_Prone_Areas.tif
+data/rasters/Punjab_Water_Storage_Stress.tif
+data/rasters/Punjab_Crop_Vegetation_Stress.tif
+data/rasters/Punjab_Heat_Stress_Hotspots.tif
+data/rasters/Punjab_Rainfall_Deficit_Zones.tif
+data/rasters/Punjab_Soil_Moisture_Stress.tif
+
+data/tables/Punjab_District_Risk_Scorecard.csv
+data/vectors/Punjab_Districts.geojson
