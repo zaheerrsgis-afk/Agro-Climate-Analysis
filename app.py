@@ -1,7 +1,6 @@
 import base64
 import io
 import json
-import shutil
 from pathlib import Path
 
 import folium
@@ -20,7 +19,6 @@ from streamlit_folium import st_folium
 # Final app.py
 #
 # Supports:
-# - Rasters stored on Google Drive public folder and downloaded at runtime
 # - GeoJSON boundary: data/vectors/Punjab_Districts.geojson
 # - Shapefile boundary fallback:
 #   data/vectors/Punjab_Districts.shp
@@ -53,15 +51,6 @@ VECTOR_DIR = DATA_DIR / "vectors"
 SCORECARD_FILE = TABLE_DIR / "Punjab_District_Risk_Scorecard.csv"
 DISTRICTS_GEOJSON_FILE = VECTOR_DIR / "Punjab_Districts.geojson"
 DISTRICTS_SHP_FILE = VECTOR_DIR / "Punjab_Districts.shp"
-
-# Google Drive folder that stores raster GeoTIFFs.
-# The folder must be public: Anyone with the link can view.
-GOOGLE_DRIVE_RASTER_FOLDER_URL = "https://drive.google.com/drive/folders/1UwUZ8xTzbLK116mvRbS3hVJoXlMLt2bi?usp=drive_link"
-
-# Create required local folders if they do not exist.
-RASTER_DIR.mkdir(parents=True, exist_ok=True)
-TABLE_DIR.mkdir(parents=True, exist_ok=True)
-VECTOR_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # =====================================================
@@ -168,110 +157,6 @@ LAYER_CONFIG = {
         },
     },
 }
-
-
-# =====================================================
-# Google Drive Raster Sync
-# =====================================================
-
-def required_raster_filenames():
-    """Return only required public class raster filenames.
-
-    Score rasters are optional and are not required for deployment.
-    """
-    names = []
-    for cfg in LAYER_CONFIG.values():
-        if cfg.get("class_file"):
-            names.append(cfg["class_file"])
-    return list(dict.fromkeys(names))
-
-
-
-def flatten_downloaded_rasters():
-    """
-    gdown may create subfolders depending on Google Drive folder structure.
-    This function copies any GeoTIFF found under data/rasters subfolders
-    back into data/rasters root so the dashboard can find it.
-    """
-    for pattern in ["*.tif", "*.tiff", "*.TIF", "*.TIFF"]:
-        for src_file in RASTER_DIR.rglob(pattern):
-            if src_file.parent == RASTER_DIR:
-                continue
-            dst_file = RASTER_DIR / src_file.name
-            if not dst_file.exists():
-                shutil.copy2(src_file, dst_file)
-
-
-@st.cache_resource(show_spinner=False)
-def sync_rasters_from_google_drive():
-    """
-    Download missing rasters from the public Google Drive folder.
-    The function is cached so it does not download again on every interaction.
-    """
-    expected = required_raster_filenames()
-    before_missing = [f for f in expected if not (RASTER_DIR / f).exists()]
-
-    if not before_missing:
-        return {
-            "status": "ready",
-            "downloaded": False,
-            "missing": [],
-            "message": "All rasters are available locally."
-        }
-
-    try:
-        import gdown
-    except Exception as exc:
-        return {
-            "status": "error",
-            "downloaded": False,
-            "missing": before_missing,
-            "message": (
-                "gdown is not installed. Add gdown to requirements.txt. "
-                f"Original error: {exc}"
-            )
-        }
-
-    try:
-        # Download folder contents into data/rasters.
-        # remaining_ok=True allows public folders with many files.
-        gdown.download_folder(
-            url=GOOGLE_DRIVE_RASTER_FOLDER_URL,
-            output=str(RASTER_DIR),
-            quiet=True,
-            use_cookies=False,
-            remaining_ok=True
-        )
-
-        flatten_downloaded_rasters()
-
-        after_missing = [f for f in expected if not (RASTER_DIR / f).exists()]
-
-        if after_missing:
-            return {
-                "status": "partial",
-                "downloaded": True,
-                "missing": after_missing,
-                "message": (
-                    "Google Drive download completed, but some expected files are still missing. "
-                    "Check that filenames in Drive exactly match the expected names."
-                )
-            }
-
-        return {
-            "status": "ready",
-            "downloaded": True,
-            "missing": [],
-            "message": "Rasters downloaded successfully from Google Drive."
-        }
-
-    except Exception as exc:
-        return {
-            "status": "error",
-            "downloaded": False,
-            "missing": before_missing,
-            "message": f"Could not download rasters from Google Drive: {exc}"
-        }
 
 
 # =====================================================
@@ -817,9 +702,9 @@ def crop_to_valid(data, transform):
 
 
 def choose_raster_path(layer_name):
-    """Use public 1–4 class rasters only.
+    """Use local public 1–4 class rasters only.
 
-    This is more stable on Streamlit Cloud and matches the standard legend.
+    Upload these GeoTIFFs directly in GitHub under data/rasters/.
     """
     cfg = LAYER_CONFIG[layer_name]
     return RASTER_DIR / cfg["class_file"]
@@ -1007,9 +892,6 @@ def render_legend(layer_name):
 # Load Data
 # =====================================================
 
-with st.spinner("Preparing raster layers from Google Drive..."):
-    raster_sync_status = sync_rasters_from_google_drive()
-
 scorecard = load_scorecard(str(SCORECARD_FILE))
 boundary_gj, boundary_source = load_boundary_geojson(str(DISTRICTS_GEOJSON_FILE), str(DISTRICTS_SHP_FILE))
 
@@ -1120,6 +1002,8 @@ with map_col:
     st_folium(m, width=None, height=650, returned_objects=[])
     st.markdown('</div>', unsafe_allow_html=True)
     st.caption(f"Raster displayed: {raster_name}. Maps are clipped to Punjab or selected district.")
+    if not (RASTER_DIR / raster_name).exists():
+        st.error(f"Local raster is missing: data/rasters/{raster_name}")
 
 
 # =====================================================
@@ -1136,13 +1020,6 @@ with right_col:
         st.markdown(f'<div class="alert-box"><b>{selected_district}</b><br>District-specific raster and statistics are active.</div>', unsafe_allow_html=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
-
-    if raster_sync_status.get("status") in ["error", "partial"]:
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.warning(raster_sync_status.get("message"))
-        if raster_sync_status.get("missing"):
-            st.caption("Missing raster files: " + ", ".join(raster_sync_status.get("missing")))
-        st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.markdown('<div class="result-title">Result & Legend</div>', unsafe_allow_html=True)
@@ -1197,7 +1074,7 @@ with right_col:
 # =====================================================
 
 st.markdown("---")
-tab1, tab2, tab3, tab4 = st.tabs(["District Scorecard", "District Profile", "Methodology", "Raster Diagnostics"])
+tab1, tab2, tab3 = st.tabs(["District Scorecard", "District Profile", "Methodology"])
 
 with tab1:
     st.subheader(f"District Scorecard — {selected_layer}")
@@ -1280,48 +1157,4 @@ with tab3:
 
         **Important note:** Water Storage Stress is not exact groundwater depth. It represents broad regional water storage pressure.
         """
-    )
-
-
-
-with tab4:
-    st.subheader("Raster Diagnostics")
-
-    expected = required_raster_filenames()
-    rows = []
-
-    for fname in expected:
-        p = RASTER_DIR / fname
-        row = {
-            "Raster": fname,
-            "Status": "Found" if p.exists() else "Missing",
-            "Size_KB": round(p.stat().st_size / 1024, 2) if p.exists() else None,
-            "Min": None,
-            "Max": None,
-            "Values_sample": None,
-        }
-
-        if p.exists():
-            try:
-                with rasterio.open(p) as src:
-                    arr = src.read(1).astype(float)
-                    if src.nodata is not None:
-                        arr[arr == src.nodata] = np.nan
-                    valid = arr[np.isfinite(arr)]
-                    if valid.size:
-                        row["Min"] = float(np.nanmin(valid))
-                        row["Max"] = float(np.nanmax(valid))
-                        vals = np.unique(valid)
-                        row["Values_sample"] = ", ".join([str(v) for v in vals[:12]])
-                    else:
-                        row["Values_sample"] = "No valid pixels"
-            except Exception as e:
-                row["Values_sample"] = f"Read error: {e}"
-
-        rows.append(row)
-
-    st.dataframe(pd.DataFrame(rows), use_container_width=True)
-    st.info(
-        "For class rasters, valid values should normally be 1, 2, 3 and 4. "
-        "If a raster is only 1–2 KB or has no valid pixels, it was likely exported empty or with very limited data from GEE."
     )
