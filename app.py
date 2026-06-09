@@ -11,7 +11,7 @@ import rasterio
 import streamlit as st
 from rasterio.transform import array_bounds
 from rasterio.warp import calculate_default_transform, reproject, Resampling
-from streamlit_folium import st_folium
+import streamlit.components.v1 as components
 
 
 # =====================================================
@@ -888,6 +888,46 @@ def render_legend(layer_name):
     )
 
 
+
+# =====================================================
+# Raster Diagnostics Helper
+# =====================================================
+
+def raster_diagnostics_table():
+    rows = []
+    for layer_name, cfg in LAYER_CONFIG.items():
+        # support either key name used in different app versions
+        fname = cfg.get("class_file") or cfg.get("file")
+        p = RASTER_DIR / fname
+        row = {
+            "Layer": layer_name,
+            "File": fname,
+            "Exists": p.exists(),
+            "Size_KB": round(p.stat().st_size / 1024, 2) if p.exists() else None,
+            "Min": None,
+            "Max": None,
+            "Values_sample": None,
+        }
+        if p.exists():
+            try:
+                with rasterio.open(p) as src:
+                    arr = src.read(1).astype(float)
+                    if src.nodata is not None:
+                        arr[arr == src.nodata] = np.nan
+                    valid = arr[np.isfinite(arr)]
+                    if valid.size:
+                        row["Min"] = float(np.nanmin(valid))
+                        row["Max"] = float(np.nanmax(valid))
+                        vals = np.unique(valid)
+                        row["Values_sample"] = ", ".join([str(v) for v in vals[:12]])
+                    else:
+                        row["Values_sample"] = "No valid pixels"
+            except Exception as e:
+                row["Values_sample"] = f"Read error: {e}"
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 # =====================================================
 # Load Data
 # =====================================================
@@ -999,7 +1039,7 @@ with map_col:
     )
 
     m, raster_name = render_map(selected_layer, selected_district, use_balanced_classes, opacity, boundary_gj)
-    st_folium(m, width=None, height=650, returned_objects=[])
+    components.html(m.get_root().render(), height=650, scrolling=False)
     st.markdown('</div>', unsafe_allow_html=True)
     st.caption(f"Raster displayed: {raster_name}. Maps are clipped to Punjab or selected district.")
     if not (RASTER_DIR / raster_name).exists():
@@ -1074,7 +1114,7 @@ with right_col:
 # =====================================================
 
 st.markdown("---")
-tab1, tab2, tab3 = st.tabs(["District Scorecard", "District Profile", "Methodology"])
+tab1, tab2, tab3, tab4 = st.tabs(["District Scorecard", "District Profile", "Methodology", "Raster Diagnostics"])
 
 with tab1:
     st.subheader(f"District Scorecard — {selected_layer}")
@@ -1158,3 +1198,9 @@ with tab3:
         **Important note:** Water Storage Stress is not exact groundwater depth. It represents broad regional water storage pressure.
         """
     )
+
+
+with tab4:
+    st.subheader("Raster Diagnostics")
+    st.dataframe(raster_diagnostics_table(), use_container_width=True)
+    st.info("For class rasters, values should normally include 1, 2, 3 and 4. If a raster is missing here, upload it under data/rasters/ in GitHub.")
