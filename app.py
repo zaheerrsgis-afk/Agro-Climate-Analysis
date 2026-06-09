@@ -56,7 +56,7 @@ DISTRICTS_SHP_FILE = VECTOR_DIR / "Punjab_Districts.shp"
 
 # Google Drive folder that stores raster GeoTIFFs.
 # The folder must be public: Anyone with the link can view.
-GOOGLE_DRIVE_RASTER_FOLDER_URL = "https://drive.google.com/drive/folders/1UwUZ8xTzbLK116mvRbS3hVJoXlMLt2bi?usp=sharing"
+GOOGLE_DRIVE_RASTER_FOLDER_URL = "https://drive.google.com/drive/folders/1UwUZ8xTzbLK116mvRbS3hVJoXlMLt2bi?usp=drive_link"
 
 # Create required local folders if they do not exist.
 RASTER_DIR.mkdir(parents=True, exist_ok=True)
@@ -175,15 +175,16 @@ LAYER_CONFIG = {
 # =====================================================
 
 def required_raster_filenames():
-    """Return all raster filenames expected by the app."""
+    """Return only required public class raster filenames.
+
+    Score rasters are optional and are not required for deployment.
+    """
     names = []
     for cfg in LAYER_CONFIG.values():
         if cfg.get("class_file"):
             names.append(cfg["class_file"])
-        if cfg.get("score_file"):
-            names.append(cfg["score_file"])
-    # Unique while preserving order
     return list(dict.fromkeys(names))
+
 
 
 def flatten_downloaded_rasters():
@@ -816,12 +817,11 @@ def crop_to_valid(data, transform):
 
 
 def choose_raster_path(layer_name):
+    """Use public 1–4 class rasters only.
+
+    This is more stable on Streamlit Cloud and matches the standard legend.
+    """
     cfg = LAYER_CONFIG[layer_name]
-    score = cfg.get("score_file")
-
-    if score and file_available(RASTER_DIR / score):
-        return RASTER_DIR / score
-
     return RASTER_DIR / cfg["class_file"]
 
 
@@ -1197,7 +1197,7 @@ with right_col:
 # =====================================================
 
 st.markdown("---")
-tab1, tab2, tab3 = st.tabs(["District Scorecard", "District Profile", "Methodology"])
+tab1, tab2, tab3, tab4 = st.tabs(["District Scorecard", "District Profile", "Methodology", "Raster Diagnostics"])
 
 with tab1:
     st.subheader(f"District Scorecard — {selected_layer}")
@@ -1280,4 +1280,48 @@ with tab3:
 
         **Important note:** Water Storage Stress is not exact groundwater depth. It represents broad regional water storage pressure.
         """
+    )
+
+
+
+with tab4:
+    st.subheader("Raster Diagnostics")
+
+    expected = required_raster_filenames()
+    rows = []
+
+    for fname in expected:
+        p = RASTER_DIR / fname
+        row = {
+            "Raster": fname,
+            "Status": "Found" if p.exists() else "Missing",
+            "Size_KB": round(p.stat().st_size / 1024, 2) if p.exists() else None,
+            "Min": None,
+            "Max": None,
+            "Values_sample": None,
+        }
+
+        if p.exists():
+            try:
+                with rasterio.open(p) as src:
+                    arr = src.read(1).astype(float)
+                    if src.nodata is not None:
+                        arr[arr == src.nodata] = np.nan
+                    valid = arr[np.isfinite(arr)]
+                    if valid.size:
+                        row["Min"] = float(np.nanmin(valid))
+                        row["Max"] = float(np.nanmax(valid))
+                        vals = np.unique(valid)
+                        row["Values_sample"] = ", ".join([str(v) for v in vals[:12]])
+                    else:
+                        row["Values_sample"] = "No valid pixels"
+            except Exception as e:
+                row["Values_sample"] = f"Read error: {e}"
+
+        rows.append(row)
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    st.info(
+        "For class rasters, valid values should normally be 1, 2, 3 and 4. "
+        "If a raster is only 1–2 KB or has no valid pixels, it was likely exported empty or with very limited data from GEE."
     )
