@@ -424,7 +424,7 @@ def choose_raster_path(layer_name):
 
 
 @st.cache_data(show_spinner=False, max_entries=12)
-def raster_to_overlay_payload(path, layer_name, shapes_json, use_balanced_classes, max_size=650):
+def raster_to_overlay_payload(path, layer_name, shapes_json, use_balanced_classes, max_size=420):
     p = Path(path)
     if not file_available(p):
         return None
@@ -496,7 +496,7 @@ def render_map(selected_layer, selected_district, use_balanced_classes, opacity,
         tooltip = folium.GeoJsonTooltip(fields=[prop], aliases=["District"], sticky=True) if prop else None
         if selected_district == "All Punjab":
             folium.GeoJson(
-                boundary_gj,
+                simplified_geojson_for_display(boundary_gj, step=10),
                 name="Punjab districts",
                 style_function=lambda feature: {"fillColor": "transparent", "color": "#0f8f6a", "weight": 0.9, "fillOpacity": 0.0, "opacity": 0.65},
                 tooltip=tooltip,
@@ -544,9 +544,9 @@ elif boundary_gj:
 # Header
 st.markdown(
     """
-    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-top:18px; margin-bottom:18px;">
         <div>
-            <h2 style="margin:0; color:#166534; font-size:2rem; font-weight:850;">Agro Climate Analysis</h2>
+            <h2 style="margin:0; color:#166534; font-size:1.95rem; font-weight:850;">Agro Climate Analysis</h2>
             <div style="color:#6b7280; font-size:0.95rem;">Satellite-based agro-climate stress monitoring and district-level risk analysis</div>
         </div>
     </div>
@@ -607,7 +607,7 @@ with map_col:
         # This avoids repeated automatic reruns caused by static Folium HTML callbacks.
         components.html(m.get_root().render(), height=560, scrolling=False)
 
-        st.caption(f"Raster displayed: {raster_name}. Maps are clipped to Punjab or selected district.")
+        st.caption(f"Raster displayed: {raster_name}. District view is clipped to selected district. All Punjab view is optimized for smooth loading.")
     else:
         st.warning("Raster layers are not available. Please check Google Drive sharing and file names.")
     st.markdown('</div>', unsafe_allow_html=True)
