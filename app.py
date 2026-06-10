@@ -11,7 +11,7 @@ import pandas as pd
 import rasterio
 import streamlit as st
 from rasterio.warp import calculate_default_transform, reproject, Resampling
-from streamlit_folium import st_folium
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="Agro Climate Analysis",
@@ -560,7 +560,14 @@ with left_col:
     st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.markdown('<div class="step-title"><span class="step-badge">1</span> Area of Interest</div>', unsafe_allow_html=True)
     st.markdown('<div class="tab-row"><span class="tab-active">District</span><span class="tab-muted">GeoJSON</span><span class="tab-muted">Shapefile</span><span class="tab-muted">Raster</span></div>', unsafe_allow_html=True)
-    selected_district = st.selectbox("Select district / AOI", district_names, index=0, label_visibility="collapsed")
+    default_district = "Bahawalnagar"
+    default_index = district_names.index(default_district) if default_district in district_names else 0
+    selected_district = st.selectbox(
+        "Select district / AOI",
+        district_names,
+        index=default_index,
+        label_visibility="collapsed"
+    )
     st.markdown(f'<div class="small-help">Boundary source: {boundary_source}. Rasters load from Google Drive.</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -595,7 +602,11 @@ with map_col:
     st.markdown(f'<div class="map-header"><span class="pill">AOI: {selected_district}</span><span class="pill">Layer: {selected_layer}</span><span class="pill">Baseline: 2018–2024</span></div>', unsafe_allow_html=True)
     if rasters_ready:
         m, raster_name = render_map(selected_layer, selected_district, use_balanced_classes, opacity, boundary_gj)
-        st_folium(m, width=None, height=560, returned_objects=[])
+
+        # Static Folium HTML map.
+        # This avoids repeated automatic reruns caused by static Folium HTML callbacks.
+        components.html(m.get_root().render(), height=560, scrolling=False)
+
         st.caption(f"Raster displayed: {raster_name}. Maps are clipped to Punjab or selected district.")
     else:
         st.warning("Raster layers are not available. Please check Google Drive sharing and file names.")
